@@ -1,31 +1,35 @@
 /**
- * zai-usage.ts — 在 footer 状态行内联显示智谱 GLM / Z.ai Coding Plan 的「真实服务端配额」。
+ * zai-usage.ts — show your **real server-side quota** for Zhipu GLM / Z.ai Coding Plan
+ * inline in pi's footer status bar.
  *
- * 关键突破（参考 cc-switch 的 coding_plan 实现）：
- * 智谱/Z.ai 其实【开放】配额查询接口，我先前「不开放」的判断是错的。
+ * Zhipu/Z.ai actually exposes a quota endpoint (per cc-switch's coding_plan implementation):
  *   GET {base}/api/monitor/usage/quota/limit
- *   Authorization: Bearer <api_key>   ← 实测：国内站裸 key/Bearer 都接受；国际站用 Bearer（参考 cc-switch / pi-glm-usage）。统一用 Bearer 最通用。
+ *   Authorization: Bearer <api_key>   ← tested: both the CN site (bare key / Bearer) and the
+ *                                       international site accept Bearer; always use Bearer.
  *   Content-Type: application/json
  *   Accept-Language: en-US,en
- * 响应 data.limits[]（unit 含义来自 z.ai 前端源码）：
- *   - TOKENS_LIMIT unit=3：5 小时滚动 token 窗口（徽标主显示）
- *   - TOKENS_LIMIT unit=6：周配额（部分套餐/国际站才有，有则 /usage 展示）
- *   - TIME_LIMIT   unit=5：工具/搜索类（月度）
- * 本扩展取 TOKENS_LIMIT(unit=3) 作为主徽标，跨设备准确、带重置倒计时。
- * 当 API 不可达时，回退到扫描本机会话 JSONL 做本地近似（带 ~ 前缀区分）。
+ * Response data.limits[] (unit semantics from the z.ai frontend source):
+ *   - TOKENS_LIMIT unit=3: 5-hour rolling token window (main badge)
+ *   - TOKENS_LIMIT unit=6: weekly quota (some plans / international site only; shown in /usage)
+ *   - TIME_LIMIT   unit=5: tools/search (monthly)
+ * This extension uses TOKENS_LIMIT(unit=3) as the main badge — accurate across devices,
+ * with reset countdown.
+ * When the API is unreachable, falls back to scanning local session JSONLs for a local
+ * approximation (distinguished by a ~ prefix).
  *
- * 渲染：用 ctx.ui.setFooter() 接管 footer，**单行布局** `pwd  stats ···· model`，
- * 徽标注入 stats 的「上下文窗口」与「(auto)」之间：
+ * Rendering: takes over the footer with ctx.ui.setFooter(), **single-line layout**
+ * `pwd  stats ···· model`, badge injected between the context-window % and "(auto)":
  *   `~/proj (main)  ↑1k ↓227 0.6%/200K zai 5h 28% (auto)        glm-5.1`
- * setStatus() 的徽标会被固定到单独的「扩展状态行」，无法并入 stats 行，故用 setFooter。
+ * setStatus() pins badges to a separate extension status row that can't merge into the
+ * stats line — hence setFooter.
  *
- * 环境变量：
- *   PI_USAGE_BASE      配额端点 host（默认按 provider 自动：zai-coding-cn→bigmodel.cn，否则 z.ai）
- *   PI_USAGE_WINDOW_H  本地回退的滚动窗口小时数（默认 5）
- *   PI_USAGE_PROVIDER  本地回退的 provider 匹配子串
+ * Environment variables:
+ *   PI_USAGE_BASE      quota endpoint host (default auto per provider: zai-coding-cn→bigmodel.cn, else z.ai)
+ *   PI_USAGE_WINDOW_H  rolling window hours for the local fallback (default 5)
+ *   PI_USAGE_PROVIDER  provider substring match for the local fallback
  *
- * 命令：
- *   /usage   弹出配额明细（套餐档位 / 5h token / 工具额度 / 重置时间），再次执行关闭
+ * Command:
+ *   /usage   toggle the quota detail popup (plan tier / 5h tokens / tool quotas / reset times)
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -34,13 +38,13 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 const WIDGET_KEY = "zai-usage-detail";
 
-// ── 紧凑数字格式 ────────────────────────────────────────────
+// ── Compact number formatting ────────────────────────────────────────────
 function fmt(n: number): string {
 	if (n < 1000) return `${Math.round(n)}`;
 	if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
 	return `${(n / 1_000_000).toFixed(2)}M`;
 }
-/** footer token 格式（忠实复刻 pi 默认 footer 的 formatTokens） */
+/** Footer token format (mirrors pi's default footer formatTokens) */
 function formatTokens(count: number): string {
 	if (count < 1000) return count.toString();
 	if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
@@ -48,7 +52,7 @@ function formatTokens(count: number): string {
 	if (count < 10_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
 	return `${Math.round(count / 1_000_000)}M`;
 }
-/** cwd → footer 显示（~ 替换 home） */
+/** cwd → footer display (home replaced with ~) */
 function formatCwdForFooter(cwd: string, home: string | undefined): string {
 	if (!home) return cwd;
 	const resolvedCwd = path.resolve(cwd);
@@ -60,21 +64,21 @@ function formatCwdForFooter(cwd: string, home: string | undefined): string {
 	return rel === "" ? "~" : `~${path.sep}${rel}`;
 }
 
-// ── 服务端配额 ──────────────────────────────────────────────
+// ── Server-side quota ──────────────────────────────────────────────
 interface LimitTier {
 	percentage: number;
 	resetMs: number | null;
 }
 interface Quota {
-	level: string | null; // 套餐档位: lite / pro / ...
-	tokens: LimitTier | null; // TOKENS_LIMIT, unit=3（5h token 窗口）— 徽标主显示
-	weekly: LimitTier | null; // TOKENS_LIMIT, unit=6（周配额，部分套餐/国际站才有）
-	time: LimitTier | null; // TIME_LIMIT, unit=5（工具/搜索类，月度）
+	level: string | null; // plan tier: lite / pro / ...
+	tokens: LimitTier | null; // TOKENS_LIMIT, unit=3 (5h token window) — main badge
+	weekly: LimitTier | null; // TOKENS_LIMIT, unit=6 (weekly quota; some plans / intl site only)
+	time: LimitTier | null; // TIME_LIMIT, unit=5 (tools/search, monthly)
 	timeDetails?: { model: string; usage: number }[];
 	queriedAt: number;
 }
 
-/** GET 配额接口，解析 TOKENS_LIMIT(unit=3) 与 TIME_LIMIT。Authorization 不加 Bearer。 */
+/** Fetch the quota endpoint; parse TOKENS_LIMIT(unit=3) and TIME_LIMIT. Uses Bearer auth. */
 async function fetchQuota(base: string, apiKey: string): Promise<Quota | null> {
 	let resp: Response;
 	try {
@@ -129,7 +133,7 @@ async function fetchQuota(base: string, apiKey: string): Promise<Quota | null> {
 	};
 }
 
-// ── 本地兜底：扫描会话 JSONL ────────────────────────────────
+// ── Local fallback: scan session JSONLs ────────────────────────────────
 interface LocalTotals {
 	total: number;
 	input: number;
@@ -215,7 +219,7 @@ export default function (pi: ExtensionAPI) {
 	const windowMs = windowH * 3600 * 1000;
 
 	let quota: Quota | null = null;
-	let local: LocalTotals | null = null; // 本地兜底
+	let local: LocalTotals | null = null; // local fallback
 	let lastFetch = 0;
 	let fetching = false;
 	let autoCompact: boolean | undefined;
@@ -229,14 +233,14 @@ export default function (pi: ExtensionAPI) {
 	function quotaBase(ctx: any): string {
 		if (process.env.PI_USAGE_BASE) return process.env.PI_USAGE_BASE;
 		const prov = String(ctx?.model?.provider ?? "");
-		// zai-coding-cn / 含 bigmodel → 国内站；其余 → 国际站
+		// zai-coding-cn / contains bigmodel → CN site; otherwise international site
 		if (prov.includes("cn") || prov.includes("bigmodel")) return "https://open.bigmodel.cn";
 		return "https://api.z.ai";
 	}
 
 	async function refreshQuota(ctx: any): Promise<void> {
 		if (fetching) return;
-		// 最小间隔 30s，避免 message_end 频繁打 API
+		// min 30s between fetches so message_end doesn't hammer the API
 		if (Date.now() - lastFetch < 30_000 && quota) return;
 		fetching = true;
 		lastFetch = Date.now();
@@ -249,7 +253,7 @@ export default function (pi: ExtensionAPI) {
 				/* ignore */
 			}
 			if (!key) {
-				// 兜底：直接读 auth.json
+				// fallback: read auth.json directly
 				try {
 					const auth = JSON.parse(
 						fs.readFileSync(path.join(path.dirname(globalRoot(ctx)), "auth.json"), "utf8"),
@@ -263,7 +267,7 @@ export default function (pi: ExtensionAPI) {
 				const q = await fetchQuota(quotaBase(ctx), key);
 				if (q) quota = q;
 			}
-			// 本地兜底数据始终刷新一次（用于 /usage 明细与 API 失败徽标）
+			// local fallback is always refreshed (feeds /usage details and the API-failure badge)
 			local = computeWindowLocal(globalRoot(ctx), windowMs, providerMatch(ctx));
 		} catch {
 			/* ignore */
@@ -286,24 +290,24 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 		} catch {
-			/* 默认 true */
+			/* default true */
 		}
 		autoCompact = enabled;
 		return enabled;
 	}
 
-	/** 徽标（含颜色），注入 stats 行；quota 未就绪返回 undefined 表示省略 */
+	/** Badge (colored) for the stats line; undefined = omit while quota isn't ready */
 	function zaiBadge(ctx: any, theme: any): string | undefined {
 		if (quota?.tokens) {
 			const pct = quota.tokens.percentage;
 			const color = pct >= 90 ? "error" : pct >= 70 ? "warning" : "success";
 			return theme.fg(color, `zai ${windowH}h ${Math.round(pct)}%`);
 		}
-		if (local && local.total > 0) return `zai ${windowH}h ~${fmt(local.total)}`; // ~ 表示本地近似
-		return undefined; // 加载中/失败，省略徽标
+		if (local && local.total > 0) return `zai ${windowH}h ~${fmt(local.total)}`; // ~ marks a local estimate
+		return undefined; // loading/failed: omit the badge
 	}
 
-	/** 单行 footer：`pwd  stats ···· model`，zai 徽标注入「窗口」与「(auto)」之间（不再拆两行） */
+	/** Single-line footer: `pwd  stats ···· model`; the zai badge goes between the window % and "(auto)" */
 	function renderFooter(ctx: any, theme: any, footerData: any, width: number): string[] {
 		const state: any = { model: ctx.model, thinkingLevel: ctx.thinkingLevel };
 		let inT = 0,
@@ -350,24 +354,25 @@ export default function (pi: ExtensionAPI) {
 				? contextPercentValue.toFixed(1)
 				: "?";
 
-		let pwd = formatCwdForFooter(ctx.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE);
+		const pwdBase = formatCwdForFooter(ctx.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE);
 		const branch = footerData.getGitBranch();
-		if (branch) pwd = `${pwd} (${branch})`;
 		const sessionName = ctx.sessionManager.getSessionName?.();
-		if (sessionName) pwd = `${pwd} • ${sessionName}`;
+		const pwdSuffix = `${branch ? ` (${branch})` : ""}${sessionName ? ` • ${sessionName}` : ""}`;
 
-		const statsParts: string[] = [];
-		if (inT) statsParts.push(`↑${formatTokens(inT)}`);
-		if (outT) statsParts.push(`↓${formatTokens(outT)}`);
-		if (cacheRead) statsParts.push(`R${formatTokens(cacheRead)}`);
-		if (cacheWrite) statsParts.push(`W${formatTokens(cacheWrite)}`);
+		const statsHead: string[] = [];
+		const statsCache: string[] = []; // cache details — dropped first when the line gets tight
+		const statsTail: string[] = [];
+		if (inT) statsHead.push(`↑${formatTokens(inT)}`);
+		if (outT) statsHead.push(`↓${formatTokens(outT)}`);
+		if (cacheRead) statsCache.push(`R${formatTokens(cacheRead)}`);
+		if (cacheWrite) statsCache.push(`W${formatTokens(cacheWrite)}`);
 		if ((cacheRead > 0 || cacheWrite > 0) && latestCacheHitRate !== undefined) {
-			statsParts.push(`CH${latestCacheHitRate.toFixed(1)}%`);
+			statsCache.push(`CH${latestCacheHitRate.toFixed(1)}%`);
 		}
 		const usingSubscription = state.model ? state.model.provider === "kimi-coding" : false;
-		if (cost || usingSubscription) statsParts.push(`$${cost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`);
+		if (cost || usingSubscription) statsTail.push(`$${cost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`);
 
-		// 上下文百分比：`pct/window [zai] (auto)`
+		// context percentage: `pct/window [zai] (auto)`
 		const autoIndicator = readAutoCompact(ctx) ? " (auto)" : "";
 		const windowStr =
 			contextPercent === "?"
@@ -380,13 +385,14 @@ export default function (pi: ExtensionAPI) {
 		if (contextPercentValue > 90) contextPercentStr = theme.fg("error", contextPercentDisplay);
 		else if (contextPercentValue > 70) contextPercentStr = theme.fg("warning", contextPercentDisplay);
 		else contextPercentStr = contextPercentDisplay;
-		statsParts.push(contextPercentStr);
+		statsTail.push(contextPercentStr);
 		if (process.env.PI_EXPERIMENTAL === "1") {
-			statsParts.push(`${theme.fg("dim", "•")} ${theme.bold(theme.fg("warning", "xp"))}`);
+			statsTail.push(`${theme.fg("dim", "•")} ${theme.bold(theme.fg("warning", "xp"))}`);
 		}
-		let statsLeft = statsParts.join(" ");
+		let statsLeft = [...statsHead, ...statsCache, ...statsTail].join(" ");
+		const statsSlim = [...statsHead, ...statsTail].join(" "); // same line with cache stats dropped
 
-		// 右侧模型名（+ thinking / provider）
+		// right side: model name (+ thinking / provider)
 		const modelName = state.model?.id || "no-model";
 		let rightSideWithoutProvider = modelName;
 		if (state.model?.reasoning) {
@@ -399,35 +405,46 @@ export default function (pi: ExtensionAPI) {
 			rightSide = `(${state.model.provider}) ${rightSideWithoutProvider}`;
 		}
 
-		// ── 单行 footer：`pwd  stats ···· model`（不再拆两行换行） ──
-		// 宽度不足时按可舍弃程度逐级裁剪：provider 前缀 → pwd → 右侧模型名；
-		// stats（含 zai 徽标 / 上下文%）是核心信息，尽量保完整
+		// ── single-line footer: `pwd  stats ···· model` ──
+		// Degrade progressively when the line is tight — most disposable first:
+		//   provider prefix → path detail (full → last 2 segments → last segment) →
+		//   thinking suffix → branch/session suffix → whole path → cache stats → model name.
+		// Core stats (in/out/cost/context% + zai badge) stay intact; no mid-word "..." —
+		// pieces shrink or disappear instead, freeing room for the information that matters.
 		const sep = "  ";
 		const minPad = 2;
-		const statsW = visibleWidth(statsLeft);
+		const fits = (p: string, s: string, r: string) =>
+			(p === "" ? 0 : visibleWidth(p) + sep.length) + visibleWidth(s) + minPad + visibleWidth(r) <= width;
 
-		// 1) 去掉 provider 前缀
-		if (
-			rightSide !== rightSideWithoutProvider &&
-			visibleWidth(pwd) + sep.length + statsW + minPad + visibleWidth(rightSide) > width
-		) {
-			rightSide = rightSideWithoutProvider;
-		}
-		// 2) 截断/舍弃 pwd
-		let pwdStr = pwd;
-		if (visibleWidth(pwdStr) + sep.length + statsW + minPad + visibleWidth(rightSide) > width) {
-			const availForPwd = width - minPad - visibleWidth(rightSide) - sep.length - statsW;
-			pwdStr = availForPwd >= 3 ? truncateToWidth(pwd, availForPwd, "...") : "";
-		}
-		const leftW = pwdStr === "" ? statsW : visibleWidth(pwdStr) + sep.length + statsW;
-		// 3) 右侧模型名仍放不下 → 截断
+		// path-only variants of pwdBase: full → last 2 segments → last segment
+		const segs = pwdBase.split(/[\\/]+/).filter(Boolean);
+		const psep = pwdBase.includes("\\") ? "\\" : "/";
+		const last1 = segs.length ? segs[segs.length - 1] : "";
+		const last2 = segs.length > 2 ? segs.slice(-2).join(psep) : "";
+
+		let pwdStr = pwdBase + pwdSuffix;
+		// 1) drop provider prefix
+		if (!fits(pwdStr, statsLeft, rightSide)) rightSide = rightSideWithoutProvider;
+		// 2) shrink path, keeping the branch/session suffix
+		if (!fits(pwdStr, statsLeft, rightSide) && last2) pwdStr = last2 + pwdSuffix;
+		if (!fits(pwdStr, statsLeft, rightSide)) pwdStr = last1 + pwdSuffix;
+		// 3) drop thinking suffix, keep the bare model name
+		if (!fits(pwdStr, statsLeft, rightSide) && rightSide !== modelName) rightSide = modelName;
+		// 4) drop branch/session suffix
+		if (!fits(pwdStr, statsLeft, rightSide)) pwdStr = last1;
+		// 5) drop the path entirely — stats get the room
+		if (!fits(pwdStr, statsLeft, rightSide)) pwdStr = "";
+		// 6) drop cache stats (R/W/CH) before touching the model name
+		if (!fits(pwdStr, statsLeft, rightSide) && statsSlim.length < statsLeft.length) statsLeft = statsSlim;
+		// 7) still not fitting → truncate/drop the model name
+		const leftW = pwdStr === "" ? visibleWidth(statsLeft) : visibleWidth(pwdStr) + sep.length + visibleWidth(statsLeft);
 		if (leftW + minPad + visibleWidth(rightSide) > width) {
 			const availForRight = width - leftW - minPad;
 			rightSide = availForRight > 4 ? truncateToWidth(rightSide, availForRight, "") : "";
 		}
 		const rightW = visibleWidth(rightSide);
 
-		// 着色：pwd / token 统计用 dim，上下文百分比保留自身颜色
+		// coloring: pwd / token stats dim, context % keeps its own color
 		const pwdColored = pwdStr === "" ? "" : theme.fg("dim", pwdStr) + sep;
 		const statsColored = theme.fg("dim", statsLeft);
 		const rightColored = rightW === 0 ? "" : theme.fg("dim", rightSide);
@@ -461,29 +478,29 @@ export default function (pi: ExtensionAPI) {
 		if (!quota && !local) return;
 		const th = ctx.ui.theme;
 		const lines: string[] = [];
-		lines.push(th.fg("accent", `zai · 智谱 GLM Coding Plan 配额（${quotaBase(ctx)}）`));
-		if (quota?.level) lines.push(th.fg("dim", `套餐档位: ${quota.level}`));
+		lines.push(th.fg("accent", `zai · Zhipu GLM Coding Plan quota (${quotaBase(ctx)})`));
+		if (quota?.level) lines.push(th.fg("dim", `Plan: ${quota.level}`));
 		if (quota?.tokens) {
 			const color = quota.tokens.percentage >= 90 ? "error" : quota.tokens.percentage >= 70 ? "warning" : "success";
-			lines.push(th.fg(color, `5h Token 窗口: ${Math.round(quota.tokens.percentage)}% 已用`));
+			lines.push(th.fg(color, `5h token window: ${Math.round(quota.tokens.percentage)}% used`));
 			if (quota.tokens.resetMs) {
 				const mins = Math.max(0, Math.round((quota.tokens.resetMs - Date.now()) / 60000));
-				lines.push(th.fg("dim", `  重置: ${new Date(quota.tokens.resetMs).toLocaleString()}（约 ${mins} 分钟后）`));
+				lines.push(th.fg("dim", `  resets: ${new Date(quota.tokens.resetMs).toLocaleString()} (~${mins} min left)`));
 			}
 		} else {
-			lines.push(th.fg("warning", "5h Token 窗口: 接口未返回（仅本地近似）"));
+			lines.push(th.fg("warning", "5h token window: API unavailable (local estimate only)"));
 		}
 		if (quota?.weekly) {
 			const color = quota.weekly.percentage >= 90 ? "error" : quota.weekly.percentage >= 70 ? "warning" : "success";
-			lines.push(th.fg(color, `周配额: ${Math.round(quota.weekly.percentage)}% 已用`));
+			lines.push(th.fg(color, `Weekly quota: ${Math.round(quota.weekly.percentage)}% used`));
 			if (quota.weekly.resetMs) {
 				const days = Math.max(0, Math.round((quota.weekly.resetMs - Date.now()) / 86400000));
-				lines.push(th.fg("dim", `  重置: ${new Date(quota.weekly.resetMs).toLocaleString()}（约 ${days} 天后）`));
+				lines.push(th.fg("dim", `  resets: ${new Date(quota.weekly.resetMs).toLocaleString()} (~${days}d left)`));
 			}
 		}
 		if (quota?.time) {
 			const color = quota.time.percentage >= 90 ? "error" : quota.time.percentage >= 70 ? "warning" : "success";
-			lines.push(th.fg(color, `工具/搜索额度: ${Math.round(quota.time.percentage)}% 已用`));
+			lines.push(th.fg(color, `Tools/search quota: ${Math.round(quota.time.percentage)}% used`));
 			if (quota.timeDetails?.length) {
 				lines.push(th.fg("dim", "  " + quota.timeDetails.map((d) => `${d.model} ${d.usage}`).join(" · ")));
 			}
@@ -492,11 +509,11 @@ export default function (pi: ExtensionAPI) {
 			lines.push(
 				th.fg(
 					"dim",
-					`本地近似(~): ${fmt(local.total)} tok  输入 ${fmt(local.input)} 输出 ${fmt(local.output)} 缓存 ${fmt(local.cache)}`,
+					`Local est. (~): ${fmt(local.total)} tok  in ${fmt(local.input)} out ${fmt(local.output)} cache ${fmt(local.cache)}`,
 				),
 			);
 		}
-		lines.push(th.fg("muted", "数据源: 智谱 /api/monitor/usage/quota/limit · /usage 关闭"));
+		lines.push(th.fg("muted", "Source: Zhipu /api/monitor/usage/quota/limit · /usage to close"));
 		ctx.ui.setWidget(WIDGET_KEY, lines);
 	}
 
@@ -508,7 +525,7 @@ export default function (pi: ExtensionAPI) {
 		setupFooter(ctx);
 		refreshQuota(ctx);
 		if (!timer) {
-			// 周期刷新：窗口滑动 / 配额随时间变化
+			// periodic refresh: rolling window slides / quota changes over time
 			timer = setInterval(() => {
 				if (lastCtx) refreshQuota(lastCtx);
 			}, 60_000);
@@ -529,16 +546,16 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("usage", {
-		description: "显示/关闭智谱 Coding Plan 配额明细",
+		description: "Toggle Zhipu Coding Plan quota details",
 		handler: async (_args, ctx) => {
 			if (ctx.mode !== "tui") {
-				ctx.ui.notify("此命令仅在交互式 TUI 下可用", "info");
+				ctx.ui.notify("This command is only available in the interactive TUI", "info");
 				return;
 			}
 			widgetOpen = !widgetOpen;
 			if (!widgetOpen) {
 				ctx.ui.setWidget(WIDGET_KEY, undefined);
-				ctx.ui.notify("已关闭配额明细", "info");
+				ctx.ui.notify("Quota details closed", "info");
 				return;
 			}
 			await refreshQuota(ctx);

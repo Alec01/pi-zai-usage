@@ -67,7 +67,7 @@ pi install git:github.com/Alec01/pi-zai-usage
 
 ## Rendering notes
 
-Uses `ctx.ui.setFooter()` with a single-line layout `pwd  stats ···· model`; the badge is injected into stats between the context-window % and `(auto)`. On narrow terminals it trims progressively (provider prefix → pwd → model name) while keeping stats (badge / context %) intact.
+Uses `ctx.ui.setFooter()` with a single-line layout `pwd  stats ···· model`; the badge is injected into stats between the context-window % and `(auto)`. On narrow terminals it degrades progressively — provider prefix → path (full → last 2 segments → last segment) → thinking suffix → branch → whole path → cache stats → model name — keeping core stats (badge / context %) intact, with no mid-word `...` truncation.
 
 > `setStatus()` pins badges to a separate extension status row that can't merge into the stats line — hence `setFooter`.
 
@@ -135,7 +135,7 @@ pi install git:github.com/Alec01/pi-zai-usage
 
 ### 渲染说明
 
-用 `ctx.ui.setFooter()` 接管 footer，采用**单行布局** `pwd  stats ···· model`，徽标注入 stats 的「上下文窗口」与「(auto)」之间。窄终端按 provider 前缀 → pwd → 模型名 逐级裁剪，stats（含徽标 / 上下文%）核心信息尽量保完整。
+用 `ctx.ui.setFooter()` 接管 footer，采用**单行布局** `pwd  stats ···· model`，徽标注入 stats 的「上下文窗口」与「(auto)」之间。窄终端下按可舍弃程度逐级降级：provider 前缀 → 路径（完整 → 末 2 段 → 末 1 段）→ thinking 后缀 → 分支 → 整段路径 → 缓存统计 → 模型名；核心 stats（含徽标 / 上下文%）尽量保完整，不会出现「…」截断。
 
 > `setStatus()` 的徽标会被固定到单独的「扩展状态行」，无法并入 stats 行，故用 `setFooter`。
 
