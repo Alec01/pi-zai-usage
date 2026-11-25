@@ -1,9 +1,11 @@
 # pi-zai-usage
 
-[![npm version](https://img.shields.io/npm/v/pi-zai-usage.svg?color=blue)](https://www.npmjs.com/package/pi-zai-usage)
-[![npm downloads](https://img.shields.io/npm/dt/pi-zai-usage.svg?color=green)](https://www.npmjs.com/package/pi-zai-usage)
+[![npm version](https://img.shields.io/npm/v/@alecliu/pi-zai-usage.svg?color=blue)](https://www.npmjs.com/package/@alecliu/pi-zai-usage)
+[![npm downloads](https://img.shields.io/npm/dt/@alecliu/pi-zai-usage.svg?color=green)](https://www.npmjs.com/package/@alecliu/pi-zai-usage)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![pi-package](https://img.shields.io/badge/pi-package-00b57a)](https://pi.dev/packages)
+
+> Forked from [Feng-H/pi-zai-usage](https://github.com/Feng-H/pi-zai-usage) — maintained by Alec.
 
 **[English](#what-it-is) | [简体中文](#中文说明)**
 
@@ -14,11 +16,11 @@
 Displays Zhipu/Z.ai Coding Plan quotas directly in pi's footer — accurate across devices, with reset countdown. No more switching to a web page to check "how much am I down to".
 
 ```
-~/proj (main)  ↑1k ↓227 0.6%/200K zeda 5h 28% (auto)        glm-5.1
+~/proj (main)  ↑1k ↓227 0.6%/200K zai 5h 28% (auto)        glm-5.1
                                               └──── badge
 ```
 
-- `zeda 5h 28%` — 28% of the 5-hour rolling token window used, colored green/yellow/red by usage
+- `zai 5h 28%` — 28% of the 5-hour rolling token window used, colored green/yellow/red by usage
 - When the server API is unreachable, falls back to scanning local session JSONLs for a **local approximation** (distinguished by a `~` prefix)
 - `/usage` toggles a detail popup: plan tier / 5h tokens / weekly quota / tool quotas / reset times
 
@@ -46,13 +48,13 @@ Response `data.limits[]` (unit semantics from the z.ai frontend source):
 Install via **npm** (recommended):
 
 ```bash
-pi install npm:pi-zai-usage
+pi install npm:@alecliu/pi-zai-usage
 ```
 
 Or install directly from **GitHub**:
 
 ```bash
-pi install git:github.com/Feng-H/pi-zai-usage
+pi install git:github.com/Alec01/pi-zai-usage
 ```
 
 ## Environment variables (optional)
@@ -80,11 +82,11 @@ Uses `ctx.ui.setFooter()` with a single-line layout `pwd  stats ···· model`;
 把智谱/Z.ai Coding Plan 的服务端配额，直接显示在 pi 的底部状态行（footer）里，跨设备准确、带重置倒计时。不再需要切到网页查「我还剩多少额度」。
 
 ```
-~/proj (main)  ↑1k ↓227 0.6%/200K zeda 5h 28% (auto)        glm-5.1
+~/proj (main)  ↑1k ↓227 0.6%/200K zai 5h 28% (auto)        glm-5.1
                                               └──── 徽标
 ```
 
-- `zeda 5h 28%` — 5 小时滚动 token 窗口已用 28%，绿/黄/红按用量着色
+- `zai 5h 28%` — 5 小时滚动 token 窗口已用 28%，绿/黄/红按用量着色
 - 当服务端 API 不可达时，回退到扫描本机会话 JSONL 做**本地近似**（`~` 前缀区分）
 - `/usage` 命令弹出配额明细：套餐档位 / 5h token / 周配额 / 工具额度 / 重置时间，再次执行关闭
 
@@ -112,16 +114,16 @@ Authorization: Bearer <api_key>
 通过 **npm 官方镜像** 安装（推荐）：
 
 ```bash
-pi install npm:pi-zai-usage
+pi install npm:@alecliu/pi-zai-usage
 ```
 
 或者直接从 **GitHub** 安装：
 
 ```bash
-pi install git:github.com/Feng-H/pi-zai-usage
+pi install git:github.com/Alec01/pi-zai-usage
 ```
 
-- npm 官方包页面：[https://www.npmjs.com/package/pi-zai-usage](https://www.npmjs.com/package/pi-zai-usage)
+- npm 官方包页面：[https://www.npmjs.com/package/@alecliu/pi-zai-usage](https://www.npmjs.com/package/@alecliu/pi-zai-usage)
 
 ### 环境变量（可选）
 

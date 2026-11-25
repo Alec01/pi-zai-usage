@@ -1,20 +1,26 @@
 {
-  "name": "pi-zai-usage",
-  "version": "0.1.4",
+  "name": "@alecliu/pi-zai-usage",
+  "version": "0.1.5",
   "description": "pi 扩展：在 footer 状态行内联显示智谱 GLM / Z.ai Coding Plan 的真实服务端配额（5h token 窗口、周配额、工具额度），并支持本地会话兜底近似与 /usage 明细命令。",
   "keywords": [
     "pi-package"
   ],
   "license": "MIT",
-  "author": "Feng-H",
+  "author": {
+    "name": "Alec",
+    "url": "https://github.com/Alec01"
+  },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Feng-H/pi-zai-usage.git"
+    "url": "git+https://github.com/Alec01/pi-zai-usage.git"
   },
   "bugs": {
-    "url": "https://github.com/Feng-H/pi-zai-usage/issues"
+    "url": "https://github.com/Alec01/pi-zai-usage/issues"
   },
-  "homepage": "https://github.com/Feng-H/pi-zai-usage#readme",
+  "homepage": "https://github.com/Alec01/pi-zai-usage#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "extensions",
     "README.md"

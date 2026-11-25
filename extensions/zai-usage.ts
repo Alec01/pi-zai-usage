@@ -16,7 +16,7 @@
  *
  * 渲染：用 ctx.ui.setFooter() 接管 footer，**单行布局** `pwd  stats ···· model`，
  * 徽标注入 stats 的「上下文窗口」与「(auto)」之间：
- *   `~/proj (main)  ↑1k ↓227 0.6%/200K zeda 5h 28% (auto)        glm-5.1`
+ *   `~/proj (main)  ↑1k ↓227 0.6%/200K zai 5h 28% (auto)        glm-5.1`
  * setStatus() 的徽标会被固定到单独的「扩展状态行」，无法并入 stats 行，故用 setFooter。
  *
  * 环境变量：
@@ -293,17 +293,17 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	/** 徽标（含颜色），注入 stats 行；quota 未就绪返回 undefined 表示省略 */
-	function zedaBadge(ctx: any, theme: any): string | undefined {
+	function zaiBadge(ctx: any, theme: any): string | undefined {
 		if (quota?.tokens) {
 			const pct = quota.tokens.percentage;
 			const color = pct >= 90 ? "error" : pct >= 70 ? "warning" : "success";
-			return theme.fg(color, `zeda ${windowH}h ${Math.round(pct)}%`);
+			return theme.fg(color, `zai ${windowH}h ${Math.round(pct)}%`);
 		}
-		if (local && local.total > 0) return `zeda ${windowH}h ~${fmt(local.total)}`; // ~ 表示本地近似
+		if (local && local.total > 0) return `zai ${windowH}h ~${fmt(local.total)}`; // ~ 表示本地近似
 		return undefined; // 加载中/失败，省略徽标
 	}
 
-	/** 单行 footer：`pwd  stats ···· model`，zeda 徽标注入「窗口」与「(auto)」之间（不再拆两行） */
+	/** 单行 footer：`pwd  stats ···· model`，zai 徽标注入「窗口」与「(auto)」之间（不再拆两行） */
 	function renderFooter(ctx: any, theme: any, footerData: any, width: number): string[] {
 		const state: any = { model: ctx.model, thinkingLevel: ctx.thinkingLevel };
 		let inT = 0,
@@ -367,13 +367,13 @@ export default function (pi: ExtensionAPI) {
 		const usingSubscription = state.model ? state.model.provider === "kimi-coding" : false;
 		if (cost || usingSubscription) statsParts.push(`$${cost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`);
 
-		// 上下文百分比：`pct/window [zeda] (auto)`
+		// 上下文百分比：`pct/window [zai] (auto)`
 		const autoIndicator = readAutoCompact(ctx) ? " (auto)" : "";
 		const windowStr =
 			contextPercent === "?"
 				? `?/${formatTokens(contextWindow)}`
 				: `${contextPercent}%/${formatTokens(contextWindow)}`;
-		const badge = zedaBadge(ctx, theme);
+		const badge = zaiBadge(ctx, theme);
 		const contextPercentDisplay = badge ? `${windowStr} ${badge}${autoIndicator}` : `${windowStr}${autoIndicator}`;
 
 		let contextPercentStr: string;
@@ -401,7 +401,7 @@ export default function (pi: ExtensionAPI) {
 
 		// ── 单行 footer：`pwd  stats ···· model`（不再拆两行换行） ──
 		// 宽度不足时按可舍弃程度逐级裁剪：provider 前缀 → pwd → 右侧模型名；
-		// stats（含 zeda 徽标 / 上下文%）是核心信息，尽量保完整
+		// stats（含 zai 徽标 / 上下文%）是核心信息，尽量保完整
 		const sep = "  ";
 		const minPad = 2;
 		const statsW = visibleWidth(statsLeft);
@@ -461,7 +461,7 @@ export default function (pi: ExtensionAPI) {
 		if (!quota && !local) return;
 		const th = ctx.ui.theme;
 		const lines: string[] = [];
-		lines.push(th.fg("accent", `zeda · 智谱 GLM Coding Plan 配额（${quotaBase(ctx)}）`));
+		lines.push(th.fg("accent", `zai · 智谱 GLM Coding Plan 配额（${quotaBase(ctx)}）`));
 		if (quota?.level) lines.push(th.fg("dim", `套餐档位: ${quota.level}`));
 		if (quota?.tokens) {
 			const color = quota.tokens.percentage >= 90 ? "error" : quota.tokens.percentage >= 70 ? "warning" : "success";
